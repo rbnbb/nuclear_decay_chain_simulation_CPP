@@ -2,10 +2,7 @@
 #include <iostream>
 #include <string>
 #include <sqlite3.h>
-
-
 using namespace std;
-
 class Nuclide {
     char t_name[3];  
     int t_A;
@@ -72,10 +69,7 @@ class Nuclide {
     }
 };
 
-
-
 int main() {
     Nuclide aaa;
     aaa.m_show_A();
 }
-
