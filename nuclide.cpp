@@ -6,35 +6,27 @@
 
 using namespace std;
 
-string element (int a){
-    string n;
-    ifstream f("name.txt");
-    while(a>0){
-        f>>n;
-        a--;
-        if(a==0)return n;
-        }
-    }
-
-class Nucleus {
+class Nuclide {
     char t_name[3];  
     int t_A;
     int t_Z;
     public:  
-    Nucleus() {
+    Nuclide () {
         cout<<"Enter atomic number:";
         cin>>t_Z;
-        if(t_Z < 0 || t_Z > 118) {
+        while(t_Z < 0 || t_Z > 118) {
             cout<<"Stupid value try again (0-118):";
             cin>>t_Z;
             }
         cout<<"Enter mass number:";
         cin>>t_A;
-        if(t_Z < 1 || t_Z > 295) {
+        while(t_A < 1 || t_A > 295) {
             cout<<"Stupid value try again (1-295):";
             cin>>t_A;
             }
-        cout<<"You have selected "<<element(t_Z);
+    }
+    void m_update () {
+
     }
     void m_alpha () {
         t_A = t_A-2;
@@ -72,11 +64,18 @@ class Nucleus {
     void m_duble_positron () {
         t_Z = t_Z-2;
     }
+    void m_show_Z () {
+        cout<<t_Z;
+    }
+    void m_show_A () {
+        cout<<t_A;
+    }
 };
 
 
 
 int main() {
-    Nucleus aaa;
+    Nuclide aaa;
+    aaa.m_show_A();
 }
 
