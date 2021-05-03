@@ -1,8 +1,9 @@
-#include <exception>
-#include <fstream>
-#include <iostream>
-#include <sqlite3.h>
-#include <stdexcept>
+#include<iomanip>
+#include<fstream>
+#include<iostream>
+#include<random>
+#include<sqlite3.h>
+#include <vector>
 using namespace std;
 //simplify checking state of the program for undefined behaviour
 void xassert(bool all_is_good_condition, std::string error_message){
@@ -11,12 +12,23 @@ void xassert(bool all_is_good_condition, std::string error_message){
       std::terminate();
   } 
 }
+
+//holds multiple events
+struct event{
+  double t;
+  double energy;
+  string info; 
+};
 class Nuclide {
-  sqlite3* DB;
   int t_Z,t_A;
   double t_weight, t_half_life;
   bool t_is_stable;
   string t_symbol,t_decay_mode;
+  double t_time=0.0;
+  sqlite3* DB;
+  ofstream log = ofstream("nuclide_history.out"); //write nuclide change to a file
+  std::mt19937_64 gen;
+  std::uniform_real_distribution<> dis;
   //structure used strictly for extracting data from SQLite database
   struct db_extract_t{ 
       int Z,A;
@@ -24,6 +36,12 @@ class Nuclide {
       double half_life;
       double weight; // weight in atomic mass units
       string symbol,decay_mode;
+  };
+  //struct that describes a decay mode.
+  struct decay_mode_t{
+    string decay_type;
+    double branch_frac;
+    double Q;
   };
   /*function taken as argument by sqlite3_exec(). Structure explained in sqlite3
   documentation. data_name is used to assign query response to external
@@ -67,11 +85,20 @@ class Nuclide {
       rc=sqlite3_open("nuclides.db",&DB);
       xassert(rc==SQLITE_OK,"in Nuclide constructor: Error opening DB");
       m_update(Z,A);
+      log<<"At t="<<t_time<<setw(10)<<A<<t_symbol<<'\n';
+      //setting up random number generation 
+      std::random_device rd; 
+      gen= mt19937_64(rd());   //seeding mersweene twister engine with a random_device seed
+      dis=std::uniform_real_distribution<>(0.0,1.0); //initializing uniform distribution dis
+      m_decay(); //rmv_me
     }
   }
   /*prints info on class state*/
   void info(){
     printf("%i%s: Z=%i, A=%i, m=%f u, is_stable=%i, hl=%f, decays=%s\n",t_A,t_symbol.c_str(),t_Z,t_A,t_weight,t_is_stable,t_half_life,t_decay_mode.c_str());
+  }
+  double rand_num(){
+    return dis(gen);
   }
   private:
   //function that assigns class members good values by querying database
@@ -87,38 +114,97 @@ class Nuclide {
     t_weight=data.weight;
     t_half_life=data.half_life;
   }
-  void m_alpha () {
+  void m_decay(){
+    if(t_is_stable){
+      log<<t_A<<t_symbol<<" is stable.\n";
+    }
+    else if(t_half_life>15336000000){  //half-life longer than 500 years in seconds
+      log<<t_A<<t_symbol<<" has a long half life of "<<t_half_life/3600/24/355<<" years.\nYou'll have to wait a while."; 
+    }
+    else{ //here check decay modes of nuclide and select one.
+      /* first extract decay mode information from the string in the database
+       * which has structure: "num_decay_modes|decay_symbol:
+       * branch_fraction,Q-value;decay_symbol: branch_fraction,Q-value;etc.",
+       * for example: "2|A: 1.0, 8.348; EC: 5e-06, 3.479" */
+      string s=t_decay_mode;
+      //find number of decays and cut it from the beginning of string s
+      const short num_decays=stoi(s.substr(0,s.find("|")));
+      s=s.substr(s.find("|")+1,string::npos);
+      std::vector<decay_mode_t> decays(num_decays); //contains decay info for current nuclide
+      for(short i=0;i<num_decays;i++)
+      {
+        //extract info from string s and cut it from the string
+        short pos=s.find(":");
+        decays[i].decay_type=s.substr(0,pos);
+        s=s.substr(pos+1,string::npos);
+        pos=s.find(",");
+        decays[i].branch_frac=stof(s.substr(0,pos));
+        s=s.substr(pos+1,string::npos);
+        pos=s.find(";");
+        decays[i].Q=stof(s.substr(0,pos));
+        s=s.substr(pos+1,string::npos);
+        /* cout<<decays[i].decay_type<<" "<<decays[i].branch_frac<<" "<<decays[i].Q<<" "; */ 
+        /* cout<<"_"<<s<<"_\n"; */
+      } 
+      //now select which decay path to go on by comparing branch fraction with  random number between 0 and 1
+      double rand_num=dis(gen); //random number between 0 and 1 for selecting decay path
+      double cum_prob=0.0; //cumulative probability 
+      for(auto d:decays){
+        cum_prob+=d.branch_frac;
+        if(rand_num<cum_prob){
+          string s=d.decay_type;
+          if(s=="A"){
+            m_alpha(d.Q);
+          }else if(s=="B-"){
+            m_beta_minus(d.Q);
+          }else if(s=="EC"){
+            m_beta_plus(d.Q);
+          }else if(s=="N"){
+            m_neuton(d.Q);
+          }else if(s=="P"){
+            m_proton(d.Q);
+          }else if(s=="SF"){
+            m_sponenous_fission(d.Q);
+          } else xassert(1,"in Nuclide::m_decay(): d.decay_type has illegal value");
+        }
+      }
+    }
+  }
+  void m_sponenous_fission(double Q){
+    
+  }
+  void m_alpha(double Q) {
     t_A = t_A-2;
     t_Z = t_Z-4;
     m_update(t_Z,t_A);
   }
-  void m_proton () {
+  void m_proton(double Q) {
     t_A = t_A-1;
     t_Z = t_Z-1;
   }
-  void m_duble_proton () {
+  void m_duble_proton(double Q) {
     t_A = t_A-2;
     t_Z = t_Z-2;
   }
-  void m_neuton () {
+  void m_neuton(double Q) {
     t_A = t_A-1;
   }
-  void m_duble_neutron () {
+  void m_duble_neutron (double Q) {
     t_A = t_A-2;
   }
-  void m_beta_minus () {
+  void m_beta_minus (double Q) {
     t_Z = t_Z+1;
   }
-  void m_beta_plus () {
+  void m_beta_plus (double Q) {
     t_Z = t_Z-1;
   }
-  void m_duble_beta_minus () {
+  void m_duble_beta_minus (double Q) {
     t_Z = t_Z+2;
   }
-  void m_electron () {
+  void m_electron (double Q) {
     t_Z = t_Z-1;
   }
-  void m_duble_electron () {
+  void m_duble_electron (double Q) {
     t_Z = t_Z-2;
   }
   void m_duble_positron () {
@@ -127,18 +213,9 @@ class Nuclide {
 };
 
 int main() {
-  Nuclide n(59,141);
-  n.info();
-  /* cout<<"Enter atomic number:"; */
-  /* cin>>t_Z; */
-  /* while(t_Z < 0 || t_Z > 118) { */
-  /*   cout<<"Stupid value try again (0-118):"; */
-  /*   cin>>t_Z; */
-  /*   } */
-  /* cout<<"Enter mass number:"; */
-  /* cin>>t_A; */
-  /* while(t_A < 1 || t_A > 295) { */
-  /*   cout<<"Stupid value try again (1-295):"; */
-  /*   cin>>t_A; */
-  /*   } */
+  Nuclide n(89,220);
+//  n.info();
+  /* for(int i=0;i<=8000;i++) { */
+  /*   cout<<n.rand_num()<<"\n"; */
+  /* } */
 }
