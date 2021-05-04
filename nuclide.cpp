@@ -24,7 +24,7 @@ class Nuclide {
   double t_weight, t_half_life; //weight in atomic mass units and half-life in seconds
   bool t_is_stable;
   string t_symbol,t_decay_mode;
-  double t_time=0.0;  //the time elapsed from the beginning of the simulation
+  double t_time=0.0;  //the time elapsed from the beginning of the simulation in seconds
   sqlite3* DB; //SQLite3 database object
   ofstream log = ofstream("nuclide_history.out"); //write nuclide change to a file
   std::mt19937_64 gen;   //Mersweene Twister pseudorandom number generator it has a period of 2^19937-1. It returns integers
@@ -85,12 +85,11 @@ class Nuclide {
       rc=sqlite3_open("nuclides.db",&DB);
       xassert(rc==SQLITE_OK,"in Nuclide constructor: Error opening DB");
       m_update(Z,A);
-      log<<"At t="<<setw(8)<<t_time<<setw(10)<<A<<t_symbol<<'\n';
+      log<<"At t="<<setw(14)<<t_time<<"s   "<<A<<t_symbol<<'\n';
       //setting up random number generation 
       std::random_device rd; 
       gen= mt19937_64(rd());   //seeding mersweene twister engine with a random_device seed
       dis=std::uniform_real_distribution<>(0.0,1.0); //initializing uniform distribution dis
-      decay_chain(); //rmv_me
     }
   }
   /*prints info on class state*/
@@ -123,6 +122,40 @@ class Nuclide {
     t_decay_mode=data.decay_mode;
     t_weight=data.weight;
     t_half_life=data.half_life;
+  }
+  //takes time in seconds and return human readable string
+  string m_format_time(double t){
+    int secs_in_year=30672000;
+    int secs_in_day=86400;
+    int secs_in_hour=3600;
+    if(t>secs_in_year){ //if more than a year
+      int years=t/(double)secs_in_year; 
+      return to_string(years)+"y";
+    }else if(t>secs_in_day){
+      int days=t/(double)secs_in_day; 
+      t-=days*(double)secs_in_day;
+      int hours=t/(double)secs_in_hour; 
+      return to_string(days)+"d "+to_string(hours)+"h";
+    }else if(t>secs_in_hour){
+      int hours=t/(double)secs_in_hour; 
+      t-=hours*(double)secs_in_hour;
+      int min=t/60.0;  
+      return to_string(hours)+"h "+to_string(min)+"min";
+    }else if(t>0.5){
+      return to_string(t)+"s";
+    }else {
+      return to_string(t*1000)+"ms";
+    } 
+
+  }
+  /* //generate random time of disintegration according to exponential
+   * distribution with half-life specified in argument */
+  double m_time_from_half_life(double half_life){
+    xassert(half_life!=0,"in Nuclide::m_time_from_half_life(): half_life=0");
+    double lambda=0.6931471805599453/half_life; //lambda=ln(2)/t_{1/2}=decay constant
+    std::exponential_distribution<> d(lambda); //using std class for generating the numbers
+    double t=d(gen);//time in seconds
+    return t;
   }
   bool m_decay(){
     if(t_is_stable){  //stable element
@@ -186,50 +219,68 @@ class Nuclide {
       return 1; //this line is never executed
     }
   }
+  void m_log_decay(double Q,string parent,string products){
+    string daughter=to_string(t_A)+t_symbol;
+    log<<"At t="<<setw(15)<<m_format_time(t_time)<<"   "<<setw(5)<<parent<<" ----> "<<setw(5)<<daughter<<"  +  "<<products<<setw(10)<<Q<<" Mev\n";
+  }
   void m_alpha(double Q) {
-    log<<"At t="<<setw(8)<<"TTT"<<setw(10)<<t_A<<setw(2)<<t_symbol<<" ----> ";
+    string parent=to_string(t_A)+t_symbol;
+    string products="4He"; //alpha particle is 4He nucleus
+    double t=m_time_from_half_life(t_half_life);
+    t_time+=t;
     t_Z = t_Z-2;
     t_A = t_A-4;
     m_update(t_Z,t_A);
-    log<<t_A<<setw(2)<<t_symbol<<"  +  4He "<<setw(10)<<Q<<" Mev\n";
+    m_log_decay(Q,parent,products);
   }
   void m_beta_minus (double Q) {
-    log<<"At t="<<setw(8)<<"TTT"<<setw(10)<<t_A<<setw(2)<<t_symbol<<" ----> ";
-    t_Z = t_Z+1;
+    string parent=to_string(t_A)+t_symbol;
+    string products="electron(B-) + antineutrino"; 
+    double t=m_time_from_half_life(t_half_life);
+    t_time+=t;
+    t_Z = t_Z+1; // a neutron become a proton
     m_update(t_Z,t_A);
-    log<<t_A<<setw(2)<<t_symbol<<"  +  e-(B-)  + antineutrino "<<setw(10)<<Q<<" Mev\n";
+    m_log_decay(Q,parent,products);
   }
   void m_beta_plus (double Q) {
-    log<<"At t="<<setw(8)<<"TTT"<<setw(10)<<t_A<<setw(2)<<t_symbol<<" ----> ";
-    t_Z = t_Z-1;
+    string parent=to_string(t_A)+t_symbol;
+    string products="positron(B+) + neutrino"; 
+    double t=m_time_from_half_life(t_half_life);
+    t_time+=t;
+    t_Z = t_Z-1; // a proton captures an electron to become a neutron
     m_update(t_Z,t_A);
-    log<<t_A<<setw(2)<<t_symbol<<"  +  e+(B+)  + neutrino "<<setw(10)<<Q<<" Mev\n";
+    m_log_decay(Q,parent,products);
   }
   void m_spontenous_fission(double Q){
-    log<<"At t="<<setw(8)<<"TTT"<<setw(10)<<t_A<<setw(2)<<t_symbol<<" -SF-> ";
-    t_Z = t_Z-1;
-    m_update(t_Z,t_A);
-    log<<t_A<<setw(2)<<t_symbol<<"  *  + ** "<<setw(10)<<Q<<" Mev\n";
+    double t=m_time_from_half_life(t_half_life);
+    t_time+=t;
+    log<<"At t="<<setw(8)<<t_time<<setw(10)<<t_A<<setw(2)<<t_symbol<<" -SF->   *  + ** "<<setw(10)<<Q<<" Mev\n";
   }
   void m_proton(double Q) {
-    log<<"At t="<<setw(8)<<"TTT"<<setw(10)<<t_A<<setw(2)<<t_symbol<<" ----> ";
-    t_A = t_A-1;
+    string parent=to_string(t_A)+t_symbol;
+    string products="1p"; 
+    double t=m_time_from_half_life(t_half_life);
+    t_time+=t;
+    t_A = t_A-1; //a proton is ejected
     t_Z = t_Z-1;
     m_update(t_Z,t_A);
-    log<<t_A<<setw(2)<<t_symbol<<"  +  1p "<<setw(10)<<Q<<" Mev\n";
+    m_log_decay(Q,parent,products);
   }
   void m_neuton(double Q) {
-    log<<"At t="<<setw(8)<<"TTT"<<setw(10)<<t_A<<setw(2)<<t_symbol<<" ----> ";
-    t_A = t_A-1;
+    string parent=to_string(t_A)+t_symbol;
+    string products="1n"; //alpha particle is 4He nucleus
+    double t=m_time_from_half_life(t_half_life);
+    t_time+=t;
+    t_A = t_A-1; //nucleus ejects a neutron
     m_update(t_Z,t_A);
-    log<<t_A<<setw(2)<<t_symbol<<"  +  1n "<<setw(10)<<Q<<" Mev\n";
+    m_log_decay(Q,parent,products);
   }
 };
 
 int main() {
-  Nuclide n(94,230);
-//  n.info();
-  /* for(int i=0;i<=8000;i++) { */
-  /*   cout<<n.rand_num()<<"\n"; */
+  Nuclide n(92,238);
+  n.decay_chain();
+  /* for(int i=0;i<=2000;i++) { */
+  /*   cout<<n.callt(89090)<<"\n"; */
   /* } */
 }
