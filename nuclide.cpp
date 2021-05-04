@@ -21,14 +21,14 @@ struct event{
 };
 class Nuclide {
   int t_Z,t_A;
-  double t_weight, t_half_life;
+  double t_weight, t_half_life; //weight in atomic mass units and half-life in seconds
   bool t_is_stable;
   string t_symbol,t_decay_mode;
-  double t_time=0.0;
-  sqlite3* DB;
+  double t_time=0.0;  //the time elapsed from the beginning of the simulation
+  sqlite3* DB; //SQLite3 database object
   ofstream log = ofstream("nuclide_history.out"); //write nuclide change to a file
-  std::mt19937_64 gen;
-  std::uniform_real_distribution<> dis;
+  std::mt19937_64 gen;   //Mersweene Twister pseudorandom number generator it has a period of 2^19937-1. It returns integers
+  std::uniform_real_distribution<> dis; //takes random integers from mt19937 and returns a real number in a specified interval
   //structure used strictly for extracting data from SQLite database
   struct db_extract_t{ 
       int Z,A;
@@ -85,12 +85,12 @@ class Nuclide {
       rc=sqlite3_open("nuclides.db",&DB);
       xassert(rc==SQLITE_OK,"in Nuclide constructor: Error opening DB");
       m_update(Z,A);
-      log<<"At t="<<t_time<<setw(10)<<A<<t_symbol<<'\n';
+      log<<"At t="<<setw(8)<<t_time<<setw(10)<<A<<t_symbol<<'\n';
       //setting up random number generation 
       std::random_device rd; 
       gen= mt19937_64(rd());   //seeding mersweene twister engine with a random_device seed
       dis=std::uniform_real_distribution<>(0.0,1.0); //initializing uniform distribution dis
-      m_decay(); //rmv_me
+      decay_chain(); //rmv_me
     }
   }
   /*prints info on class state*/
@@ -99,6 +99,16 @@ class Nuclide {
   }
   double rand_num(){
     return dis(gen);
+  }
+  void decay_chain(){
+    bool is_decay_chain_over=m_decay();
+    int i=0;
+    while(!is_decay_chain_over&&i<100){
+      is_decay_chain_over=m_decay();
+      i++;
+    }
+    xassert(i<100,"in Nuclide::decay_chain(): more than 100 calls to m_decay. Terminating...");
+    log<<"====end====\n\n";
   }
   private:
   //function that assigns class members good values by querying database
@@ -114,12 +124,14 @@ class Nuclide {
     t_weight=data.weight;
     t_half_life=data.half_life;
   }
-  void m_decay(){
-    if(t_is_stable){
+  bool m_decay(){
+    if(t_is_stable){  //stable element
       log<<t_A<<t_symbol<<" is stable.\n";
+      return 1; //decay chain ends at stable isotope
     }
     else if(t_half_life>15336000000){  //half-life longer than 500 years in seconds
       log<<t_A<<t_symbol<<" has a long half life of "<<t_half_life/3600/24/355<<" years.\nYou'll have to wait a while."; 
+      return 1; //decay chain ends at isotope with long half-life
     }
     else{ //here check decay modes of nuclide and select one.
       /* first extract decay mode information from the string in the database
@@ -164,56 +176,58 @@ class Nuclide {
           }else if(s=="P"){
             m_proton(d.Q);
           }else if(s=="SF"){
-            m_sponenous_fission(d.Q);
-          } else xassert(1,"in Nuclide::m_decay(): d.decay_type has illegal value");
+            m_spontenous_fission(d.Q);
+            return 1; //decay chain ends at spontaneous fission
+          }else {xassert(1,"in Nuclide::m_decay(): d.decay_type has illegal value");}
+          return 0;  //decay chain continues after
         }
       }
+      xassert(1,"in Nuclide::m_decay(): unstable isotope but no decay mode selected");
+      return 1; //this line is never executed
     }
   }
-  void m_sponenous_fission(double Q){
-    
-  }
   void m_alpha(double Q) {
-    t_A = t_A-2;
-    t_Z = t_Z-4;
-    m_update(t_Z,t_A);
-  }
-  void m_proton(double Q) {
-    t_A = t_A-1;
-    t_Z = t_Z-1;
-  }
-  void m_duble_proton(double Q) {
-    t_A = t_A-2;
+    log<<"At t="<<setw(8)<<"TTT"<<setw(10)<<t_A<<setw(2)<<t_symbol<<" ----> ";
     t_Z = t_Z-2;
-  }
-  void m_neuton(double Q) {
-    t_A = t_A-1;
-  }
-  void m_duble_neutron (double Q) {
-    t_A = t_A-2;
+    t_A = t_A-4;
+    m_update(t_Z,t_A);
+    log<<t_A<<setw(2)<<t_symbol<<"  +  4He "<<setw(10)<<Q<<" Mev\n";
   }
   void m_beta_minus (double Q) {
+    log<<"At t="<<setw(8)<<"TTT"<<setw(10)<<t_A<<setw(2)<<t_symbol<<" ----> ";
     t_Z = t_Z+1;
+    m_update(t_Z,t_A);
+    log<<t_A<<setw(2)<<t_symbol<<"  +  e-(B-)  + antineutrino "<<setw(10)<<Q<<" Mev\n";
   }
   void m_beta_plus (double Q) {
+    log<<"At t="<<setw(8)<<"TTT"<<setw(10)<<t_A<<setw(2)<<t_symbol<<" ----> ";
     t_Z = t_Z-1;
+    m_update(t_Z,t_A);
+    log<<t_A<<setw(2)<<t_symbol<<"  +  e+(B+)  + neutrino "<<setw(10)<<Q<<" Mev\n";
   }
-  void m_duble_beta_minus (double Q) {
-    t_Z = t_Z+2;
-  }
-  void m_electron (double Q) {
+  void m_spontenous_fission(double Q){
+    log<<"At t="<<setw(8)<<"TTT"<<setw(10)<<t_A<<setw(2)<<t_symbol<<" -SF-> ";
     t_Z = t_Z-1;
+    m_update(t_Z,t_A);
+    log<<t_A<<setw(2)<<t_symbol<<"  *  + ** "<<setw(10)<<Q<<" Mev\n";
   }
-  void m_duble_electron (double Q) {
-    t_Z = t_Z-2;
+  void m_proton(double Q) {
+    log<<"At t="<<setw(8)<<"TTT"<<setw(10)<<t_A<<setw(2)<<t_symbol<<" ----> ";
+    t_A = t_A-1;
+    t_Z = t_Z-1;
+    m_update(t_Z,t_A);
+    log<<t_A<<setw(2)<<t_symbol<<"  +  1p "<<setw(10)<<Q<<" Mev\n";
   }
-  void m_duble_positron () {
-    t_Z = t_Z-2;
+  void m_neuton(double Q) {
+    log<<"At t="<<setw(8)<<"TTT"<<setw(10)<<t_A<<setw(2)<<t_symbol<<" ----> ";
+    t_A = t_A-1;
+    m_update(t_Z,t_A);
+    log<<t_A<<setw(2)<<t_symbol<<"  +  1n "<<setw(10)<<Q<<" Mev\n";
   }
 };
 
 int main() {
-  Nuclide n(89,220);
+  Nuclide n(94,230);
 //  n.info();
   /* for(int i=0;i<=8000;i++) { */
   /*   cout<<n.rand_num()<<"\n"; */
