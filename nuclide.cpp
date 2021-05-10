@@ -77,7 +77,7 @@ class Nuclide {
   }
   public:  
   Nuclide(int Z,int A) {
-    if(!(0<Z&&Z<118&&0<A&&A<294)){
+    if(!(0<=Z&&Z<=118&&0<A&&A<=295)){
       printf("(Z=%i,A=%i) is invalid input for Nuclide constructor\n Database query aborted\n",Z,A);
     }
     else {
@@ -85,7 +85,7 @@ class Nuclide {
       rc=sqlite3_open("nuclides.db",&DB);
       xassert(rc==SQLITE_OK,"in Nuclide constructor: Error opening DB");
       m_update(Z,A);
-      log<<"At t="<<setw(14)<<t_time<<"s   "<<A<<t_symbol<<'\n';
+      log<<"At t="<<setw(15)<<m_format_time(t_time)<<setw(8)<<to_string(t_A)+t_symbol<<'\n';
       //setting up random number generation 
       std::random_device rd; 
       gen= mt19937_64(rd());   //seeding mersweene twister engine with a random_device seed
@@ -106,9 +106,9 @@ class Nuclide {
       is_decay_chain_over=m_decay();
       i++;
     }
-    xassert(i<100,"in Nuclide::decay_chain(): more than 100 calls to m_decay. Terminating...");
-    log<<"====end====\n\n";
+    log<<"====END====\n\n";    
   }
+  
   private:
   //function that assigns class members good values by querying database
   void m_update(int Z,int A){ 
@@ -125,7 +125,7 @@ class Nuclide {
   }
   //takes time in seconds and return human readable string
   string m_format_time(double t){
-    int secs_in_year=30672000;
+    int secs_in_year=31557600;
     int secs_in_day=86400;
     int secs_in_hour=3600;
     if(t>secs_in_year){ //if more than a year
@@ -162,8 +162,8 @@ class Nuclide {
       log<<t_A<<t_symbol<<" is stable.\n";
       return 1; //decay chain ends at stable isotope
     }
-    else if(t_half_life>15336000000){  //half-life longer than 500 years in seconds
-      log<<t_A<<t_symbol<<" has a long half life of "<<t_half_life/3600/24/355<<" years.\nYou'll have to wait a while."; 
+    else if(t_half_life>15778800000){  //half-life longer than 500 years in seconds
+      log<<t_A<<t_symbol<<" has a long half life of "<<t_half_life/3600/24/365<<" years.\nYou'll have to wait a while."; 
       return 1; //decay chain ends at isotope with long half-life
     }
     else{ //here check decay modes of nuclide and select one.
@@ -221,7 +221,7 @@ class Nuclide {
   }
   void m_log_decay(double Q,string parent,string products){
     string daughter=to_string(t_A)+t_symbol;
-    log<<"At t="<<setw(15)<<m_format_time(t_time)<<"   "<<setw(5)<<parent<<" ----> "<<setw(5)<<daughter<<"  +  "<<products<<setw(10)<<Q<<" Mev\n";
+    log<<"At t="<<setw(15)<<m_format_time(t_time)<<setw(8)<<parent<<" ----> "<<setw(5)<<daughter<<"  +  "<<products<<setw(10)<<Q<<" Mev\n";
   }
   void m_alpha(double Q) {
     string parent=to_string(t_A)+t_symbol;
@@ -254,7 +254,7 @@ class Nuclide {
   void m_spontenous_fission(double Q){
     double t=m_time_from_half_life(t_half_life);
     t_time+=t;
-    log<<"At t="<<setw(8)<<t_time<<setw(10)<<t_A<<setw(2)<<t_symbol<<" -SF->   *  + ** "<<setw(10)<<Q<<" Mev\n";
+    log<<"At t="<<setw(15)<<m_format_time(t_time)<<setw(8)<<to_string(t_A)+t_symbol<<" -SF->   *  + ** " <<setw(10)<<Q<<" Mev\n";
   }
   void m_proton(double Q) {
     string parent=to_string(t_A)+t_symbol;
@@ -278,7 +278,9 @@ class Nuclide {
 };
 
 int main() {
-  Nuclide n(92,238);
+  int a,b;
+  cin>>a>>b;
+  Nuclide n(a,b);
   n.decay_chain();
   /* for(int i=0;i<=2000;i++) { */
   /*   cout<<n.callt(89090)<<"\n"; */
