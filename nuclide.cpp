@@ -277,12 +277,24 @@ class Nuclide {
   }
 };
 
-int main() {
+void userinput (){ //allows user to write values indefinitely
   int a,b;
-  cin>>a>>b;
-  Nuclide n(a,b);
-  n.decay_chain();
-  /* for(int i=0;i<=2000;i++) { */
-  /*   cout<<n.callt(89090)<<"\n"; */
-  /* } */
+  string exit;
+  cout<<"Write 'exit' to stop \n";
+  while(exit!="exit"){
+  cin>>exit;
+  if(exit!="exit"){
+    a=stoi(exit);
+    cin>>exit;
+    if(exit!="exit"){
+      b=stoi(exit);
+      Nuclide n(a,b);
+      n.decay_chain();
+      n.info(); 
+      }
+    }
+  }
+};
+int main() {
+  userinput ();
 }
