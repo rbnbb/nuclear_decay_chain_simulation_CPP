@@ -219,7 +219,7 @@ class Nuclide {
       return 1; //this line is never executed
     }
   }
-  void m_log_decay(double Q,string parent,string products){
+  void m_log_decay(const double Q,string parent,string products){
     string daughter=to_string(t_A)+t_symbol;
     log<<"At t="<<setw(15)<<m_format_time(t_time)<<"   "<<setw(5)<<parent<<" ----> "<<setw(5)<<daughter<<"  +  "<<products<<setw(10)<<Q<<" Mev\n";
   }
