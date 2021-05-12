@@ -1,9 +1,13 @@
+#include <cctype>
 #include<iomanip>
 #include<fstream>
 #include<iostream>
 #include<random>
 #include<sqlite3.h>
 #include <vector>
+#include <unordered_map>
+#include <exception>
+#include <algorithm>
 using namespace std;
 //simplify checking state of the program for undefined behaviour
 void xassert(bool all_is_good_condition, std::string error_message){
@@ -12,6 +16,30 @@ void xassert(bool all_is_good_condition, std::string error_message){
       std::terminate();
   } 
 }
+
+namespace physics{
+  struct decay_phy_t{
+    string name;
+    int dZ;
+    int dA;
+    string products;
+  };
+  const decay_phy_t alpha={"alpha",2,4,"4He"};
+  const decay_phy_t proton={"proton emission",1,1,"1p"};
+  const decay_phy_t neutron={"neutron emission",0,1,"1n"};
+  const decay_phy_t betam={"beta minus",-1,0,"electron(B-) + antineutrino"};
+  const decay_phy_t betap={"beta plus",+1,0,"positron(B+) + neutrino"};
+  const decay_phy_t sf={"spontaneous fission",0,0};
+
+  const std::unordered_map<string,decay_phy_t> radioactive_decays={
+    {"A",alpha},
+    {"P",proton},
+    {"N",neutron},
+    {"B-",betam},
+    {"EC",betap},
+    {"SF",sf}
+  };
+};
 
 //holds multiple events
 struct event{
@@ -171,10 +199,13 @@ class Nuclide {
        * which has structure: "num_decay_modes|decay_symbol:
        * branch_fraction,Q-value;decay_symbol: branch_fraction,Q-value;etc.",
        * for example: "2|A: 1.0, 8.348; EC: 5e-06, 3.479" */
+      printf("202: %s\n",t_decay_mode.c_str());
+      
       string s=t_decay_mode;
       //find number of decays and cut it from the beginning of string s
-      const short num_decays=stoi(s.substr(0,s.find("|")));
+      short num_decays=stoi(s.substr(0,s.find("|")));
       s=s.substr(s.find("|")+1,string::npos);
+      /* cout<<s<<"\n"; */
       std::vector<decay_mode_t> decays(num_decays); //contains decay info for current nuclide
       for(short i=0;i<num_decays;i++)
       {
@@ -191,6 +222,7 @@ class Nuclide {
         /* cout<<decays[i].decay_type<<" "<<decays[i].branch_frac<<" "<<decays[i].Q<<" "; */ 
         /* cout<<"_"<<s<<"_\n"; */
       } 
+      s=s.substr(s.find("|")+1,string::npos);
       //now select which decay path to go on by comparing branch fraction with  random number between 0 and 1
       double rand_num=dis(gen); //random number between 0 and 1 for selecting decay path
       double cum_prob=0.0; //cumulative probability 
@@ -198,22 +230,23 @@ class Nuclide {
         cum_prob+=d.branch_frac;
         if(rand_num<cum_prob){
           string s=d.decay_type;
-          if(s=="A"){
-            m_alpha(d.Q);
-          }else if(s=="B-"){
-            m_beta_minus(d.Q);
-          }else if(s=="EC"){
-            m_beta_plus(d.Q);
-          }else if(s=="N"){
-            m_neuton(d.Q);
-          }else if(s=="P"){
-            m_proton(d.Q);
-          }else if(s=="SF"){
-            m_spontenous_fission(d.Q);
-            return 1; //decay chain ends at spontaneous fission
-          }else {xassert(1,"in Nuclide::m_decay(): d.decay_type has illegal value");}
-          return 0;  //decay chain continues after
+          s.erase(std::remove(s.begin(), s.end(),' '),s.end()); //dropping white spaces from decay type specifier
+          string parent=to_string(t_A)+t_symbol;
+          physics::decay_phy_t this_decay;
+          try{ this_decay=physics::radioactive_decays.at(s);
+          } catch (std::out_of_range e) { cerr<<"in Nuclide::m_decay: string s=_"<<s<<"_ is not a key in radioactive_decays\n"; }
+          double t=m_time_from_half_life(t_half_life);
+          t_time+=t;
+          /* printf("before z%i et a%i\n",t_Z,t_A); */
+          
+          t_Z = t_Z-this_decay.dZ;
+          t_A = t_A-this_decay.dA;
+          /* printf("after z%i et a%i\n",t_Z,t_A); */
+          m_update(t_Z,t_A);
+          m_log_decay(d.Q,parent,this_decay.products);
+          return 0;
         }
+
       }
       xassert(1,"in Nuclide::m_decay(): unstable isotope but no decay mode selected");
       return 1; //this line is never executed
@@ -222,58 +255,6 @@ class Nuclide {
   void m_log_decay(const double Q,string parent,string products){
     string daughter=to_string(t_A)+t_symbol;
     log<<"At t="<<setw(15)<<m_format_time(t_time)<<setw(8)<<parent<<" ----> "<<setw(5)<<daughter<<"  +  "<<products<<setw(10)<<Q<<" Mev\n";
-  }
-  void m_alpha(double Q) {
-    string parent=to_string(t_A)+t_symbol;
-    string products="4He"; //alpha particle is 4He nucleus
-    double t=m_time_from_half_life(t_half_life);
-    t_time+=t;
-    t_Z = t_Z-2;
-    t_A = t_A-4;
-    m_update(t_Z,t_A);
-    m_log_decay(Q,parent,products);
-  }
-  void m_beta_minus (double Q) {
-    string parent=to_string(t_A)+t_symbol;
-    string products="electron(B-) + antineutrino"; 
-    double t=m_time_from_half_life(t_half_life);
-    t_time+=t;
-    t_Z = t_Z+1; // a neutron become a proton
-    m_update(t_Z,t_A);
-    m_log_decay(Q,parent,products);
-  }
-  void m_beta_plus (double Q) {
-    string parent=to_string(t_A)+t_symbol;
-    string products="positron(B+) + neutrino"; 
-    double t=m_time_from_half_life(t_half_life);
-    t_time+=t;
-    t_Z = t_Z-1; // a proton captures an electron to become a neutron
-    m_update(t_Z,t_A);
-    m_log_decay(Q,parent,products);
-  }
-  void m_spontenous_fission(double Q){
-    double t=m_time_from_half_life(t_half_life);
-    t_time+=t;
-    log<<"At t="<<setw(15)<<m_format_time(t_time)<<setw(8)<<to_string(t_A)+t_symbol<<" -SF->   *  + ** " <<setw(10)<<Q<<" Mev\n";
-  }
-  void m_proton(double Q) {
-    string parent=to_string(t_A)+t_symbol;
-    string products="1p"; 
-    double t=m_time_from_half_life(t_half_life);
-    t_time+=t;
-    t_A = t_A-1; //a proton is ejected
-    t_Z = t_Z-1;
-    m_update(t_Z,t_A);
-    m_log_decay(Q,parent,products);
-  }
-  void m_neuton(double Q) {
-    string parent=to_string(t_A)+t_symbol;
-    string products="1n"; //alpha particle is 4He nucleus
-    double t=m_time_from_half_life(t_half_life);
-    t_time+=t;
-    t_A = t_A-1; //nucleus ejects a neutron
-    m_update(t_Z,t_A);
-    m_log_decay(Q,parent,products);
   }
 };
 
@@ -296,5 +277,8 @@ void userinput (){ //allows user to write values indefinitely
   }
 };
 int main() {
-  userinput ();
+//  userinput ();
+  Nuclide n(95,242);
+  n.decay_chain();
+  /* cout<<"Z="<<physics_info::alpha.dZ<<" A="<<physics_info::alpha.dA; */
 }
