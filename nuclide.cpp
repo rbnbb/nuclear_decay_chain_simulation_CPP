@@ -3,11 +3,10 @@ using namespace std;
 
 //this namespace contains only const variables whose values are given by laws of physics
 namespace physics{
-  struct decay_phy_t{
+  struct decay_phy_t{ //holds info on a type of radioactive decay
     string name;
-    int dZ;
-    int dA;
-    string products;
+    int dZ, dA; //the change in atomic numbers Z and A brought by the decay
+    string products; //lists products other that daughter nuclide
   };
   const decay_phy_t alpha={"alpha",2,4,"4He"};
   const decay_phy_t proton={"proton emission",1,1,"1p"};
@@ -18,6 +17,7 @@ namespace physics{
   const decay_phy_t betap={"beta plus",+1,0,"positron(B+) + neutrino"};
   const decay_phy_t sf={"spontaneous fission",0,0,"spontaneously fissions"};
 
+  //maps the string used to identify a decay in the sqlite3 database to appropriate decay_phy_t structure. This allows to write shorter more general code in Nuclide::m_decay()
   const std::unordered_map<string,decay_phy_t> radioactive_decays={
     {"A",alpha},
     {"P",proton},
@@ -30,7 +30,7 @@ namespace physics{
   };
 };
 
-//simplify checking state of the program for undefined behaviour
+//check the state of the program for undefined behaviour and terminate if undefined behaviour found
 void xassert(bool all_is_good_condition, std::string error_message){
   if(!all_is_good_condition){
       std::cerr<<error_message<<std::endl;
@@ -48,21 +48,22 @@ Nuclide::Nuclide(int Z,int A,vector<event_t>* events) {
     rc=sqlite3_open("nuclides.db",&DB);
     xassert(rc==SQLITE_OK,"in Nuclide constructor: Error opening DB");
     m_update(Z,A);
+    t_events=events; 
     //setting up random number generation 
     std::random_device rd; 
     gen= mt19937_64(rd());   //seeding mersweene twister engine with a random_device seed
     dis=std::uniform_real_distribution<>(0.0,1.0); //initializing uniform distribution dis
-    t_events=events;
   }
 }
 
 void Nuclide::decay_chain(){
   bool is_decay_chain_over=m_decay();
   int i=0;
-  while(!is_decay_chain_over&&i<100){
+  while(!is_decay_chain_over&&i<500){
     is_decay_chain_over=m_decay();
     i++;
   }
+  xassert(i<500,"in Nuclide::decay_chain(): more that 500 calls to m_decay()");
 }
 
   /*function taken as argument by sqlite3_exec(). Structure explained in sqlite3
@@ -74,15 +75,13 @@ int Nuclide::m_sql_callback(void* data_name, int num_cols, char** col_values, ch
     char space_char=' ';
     //going through col_values and ensuring there are no null pointers that could cause crashes.
     for (int i = 0; i < num_cols; i++) {
-        /* printf("col_values: %s ; col_names: %s\n",col_values[i],col_names[i]); */
-        /* printf("%s = %s\n", col_names[i], col_values[i] ? col_values[i] : "NULL"); */
         if(col_values[i]==NULL){
             col_values[i]=&space_char;
         }
     }
     //recovering struct data from outside the function using the argument data_name
     db_extract_t* nuclide_dat=(db_extract_t*) data_name;
-    //assigning values to all nuclide_dat members using the query result
+    //assigning good values to all Nuclide class members (accessed through nuclide_dat) using the query result
     nuclide_dat->Z=atoi(col_values[0]);  
     nuclide_dat->A=atoi(col_values[1]);  
     nuclide_dat->symbol=string(col_values[2]);  
@@ -90,10 +89,6 @@ int Nuclide::m_sql_callback(void* data_name, int num_cols, char** col_values, ch
     nuclide_dat->is_stable=bool(atoi(col_values[4]));
     nuclide_dat->half_life=atof(col_values[5]);
     nuclide_dat->decay_mode=string(col_values[6]);  
-    //print for debugging
-    /* printf("num_cols: %i\n",num_cols); */
-    /* printf("%i, %i, %f, %i, %f, \n",nuclide_dat->Z,nuclide_dat->A,nuclide_dat->weight,nuclide_dat->is_stable,nuclide_dat->half_life); */
-    /* printf("%s, %s, %s, %s \n",nuclide_dat->symbol.c_str(),nuclide_dat->betam.c_str(),nuclide_dat->betap.c_str(),nuclide_dat->alpha.c_str()); */
     return 0;
 }
 
@@ -110,7 +105,7 @@ void Nuclide::m_update(int Z,int A){
   t_half_life=data.half_life;
 }
 
-double Nuclide::m_time_from_half_life(double half_life){
+double Nuclide::m_time_from_half_life(const double half_life){
   xassert(half_life!=0,"in Nuclide::m_time_from_half_life(): half_life=0");
   double lambda=0.6931471805599453/half_life; //lambda=ln(2)/t_{1/2}=decay constant
   std::exponential_distribution<> d(lambda); //using std class for generating the numbers
@@ -120,9 +115,9 @@ double Nuclide::m_time_from_half_life(double half_life){
 
 //takes time in seconds and return human readable string
 string Nuclide::m_format_time(double t){
-  int secs_in_year=31557600;
-  int secs_in_day=86400;
-  int secs_in_hour=3600;
+  const int secs_in_year=31557600;
+  const int secs_in_day=86400;
+  const int secs_in_hour=3600;
   if(t>secs_in_year){ //if more than a year
     int years=t/(double)secs_in_year; 
     return to_string(years)+"y";
@@ -144,30 +139,23 @@ string Nuclide::m_format_time(double t){
 
 }
 
-string Nuclide::m_decay_info(const double Q,string parent,string products){
+string Nuclide::m_decay_info(const double Q,const string parent,const string products){
   string daughter=to_string(t_A)+t_symbol;
   std::stringstream s; 
   s<<"At t="<<setw(15)<<m_format_time(t_time)<<setw(8)<<parent<<" ----> "<<setw(5)<<daughter<<"  +  "<<products<<setw(10)<<Q<<" Mev\n";
   return s.str();
 }
 
-bool Nuclide::m_decay(){
-  if(t_is_stable){  
-    return 1; //decay chain ends at stable isotope
-  }
-  else{ //here check decay modes of nuclide and select one.
-    /* first extract decay mode information from the string in the database
-     * which has structure: "num_decay_modes|decay_symbol:
-     * branch_fraction,Q-value;decay_symbol: branch_fraction,Q-value;etc.",
-     * for example: "2|A: 1.0, 8.348; EC: 5e-06, 3.479" */
-    /* printf("202: %s\n",t_decay_mode.c_str()); */
-    
+/* extract decay mode information from the string in the database
+ * which has structure: "num_decay_modes|decay_symbol:
+ * branch_fraction,Q-value;decay_symbol: branch_fraction,Q-value;etc.",
+ * for example: "2|A: 1.0, 8.348; EC: 5e-06, 3.479" */
+std::vector<Nuclide::decay_mode_t> Nuclide::m_decay_modes(){
     string s=t_decay_mode;
     //find number of decays and cut it from the beginning of string s
     short num_decays=stoi(s.substr(0,s.find("|")));
-    s=s.substr(s.find("|")+1,string::npos);
-    /* cout<<s<<"\n"; */
     std::vector<decay_mode_t> decays(num_decays); //contains decay info for current nuclide
+    s=s.substr(s.find("|")+1,string::npos);
     for(short i=0;i<num_decays;i++)
     {
       //extract info from string s and cut it from the string
@@ -180,10 +168,17 @@ bool Nuclide::m_decay(){
       pos=s.find(";");
       decays[i].Q=stof(s.substr(0,pos));
       s=s.substr(pos+1,string::npos);
-      /* cout<<decays[i].decay_type<<" "<<decays[i].branch_frac<<" "<<decays[i].Q<<" "; */ 
-      /* cout<<"_"<<s<<"_\n"; */
     } 
     s=s.substr(s.find("|")+1,string::npos);
+   return decays; 
+}
+
+bool Nuclide::m_decay(){
+  if(t_is_stable){  
+    return 1; //decay chain ends at stable isotope
+  }
+  else{ //here check decay modes of nuclide and select one.
+    std::vector<decay_mode_t> decays=m_decay_modes();
     //now select which decay path to go on by comparing branch fraction with  random number between 0 and 1
     double rand_num=dis(gen); //random number between 0 and 1 for selecting decay path
     double cum_prob=0.0; //cumulative probability 
@@ -195,25 +190,17 @@ bool Nuclide::m_decay(){
         string parent=to_string(t_A)+t_symbol;
         physics::decay_phy_t this_decay;
         try{ this_decay=physics::radioactive_decays.at(s);
-        } catch (std::out_of_range e) { cerr<<"in Nuclide::m_decay: string s=_"<<s<<"_ is not a key in radioactive_decays\n"; }
+        } catch (std::out_of_range e) { cerr<<"in Nuclide::m_decay: string s=_"<<s<<"_ is not a key in Physics::radioactive_decays\n"; }
         double t=m_time_from_half_life(t_half_life);
         t_time+=t;
-        /* printf("before z%i et a%i\n",t_Z,t_A); */
-        
         t_Z = t_Z-this_decay.dZ;
         t_A = t_A-this_decay.dA;
-        /* printf("after z%i et a%i\n",t_Z,t_A); */
         m_update(t_Z,t_A);
         string decay_log=m_decay_info(d.Q,parent,this_decay.products);
-        /* printf("254: decay_log:%s\n",decay_log.c_std()); */
-        
         event_t e={t_time,d.Q,decay_log};
-        cout<<e.info<<"257 \n";
         t_events->push_back(e);
-        cout<<"259: address %d"<<t_events;
         return 0;
       }
-
     }
     xassert(1,"in Nuclide::m_decay(): unstable isotope but no decay mode selected");
     return 1; //this line is never executed
@@ -233,72 +220,4 @@ void sort_events_chrnologically(vector<event_t> & events){
        }
       }
    }
-}
-
-struct initial_nuclides_t{
-  int Z,A;
-  int num; //number of nuclidez with given Z and A
-};
-
-void simulate(vector<initial_nuclides_t> nuclides){
-  vector<event_t> events;
-  events.reserve(500);
-  stringstream first_line;
-  first_line<<"At t=0"<<setw(15)<<"   ";
-  for(auto n:nuclides){
-    cout<<"298: here\n";
-    first_line<<n.num<<" x ";
-    for(int i=1;i<=n.num;i++){
-      cout<<"301: nuclide class constructor\n";
-      Nuclide x(n.Z,n.A,&events);
-      if(i==1){
-        first_line<<x.name()<<"        ";
-      }
-      x.decay_chain();
-      cout<<"307: "<<events.size();
-    }
-  }
-  sort_events_chrnologically(events);
-  ofstream out_human_readable("results_decay_hist.out");
-  ofstream out_tQ_table("results_tq_table.csv");
-  out_human_readable<<first_line.str()<<'\n';
-  for(auto e: events){
-    cout<<e.info<<'\n';
-    out_human_readable<<e.info; 
-    out_tQ_table<<setw(15)<<e.t<<";"<<setw(10)<<e.energy<<";\n"; 
-  }
-  out_human_readable.close();
-  out_tQ_table.close();
-  cout<<"DONE!\n";
-}
-
-void userinput (){ 
-  cout<<"=====Nuclear decay chains simulator 2021=====\nWrite 'exit' to terminate \n\nPlease enter the initial conditions carefully\nType the number of different isotopes (nuclides) in the simulation\n";
-  vector<initial_nuclides_t> initial_isotopes;
-  string input;
-  while(input!="exit"){
-  try{
-  cin>>input;
-  int num_unique_isotopes;
-  num_unique_isotopes=stoi(input);
-  initial_isotopes.reserve(num_unique_isotopes);
-  for(int i=1;i<=num_unique_isotopes;i++){
-    initial_nuclides_t x; 
-    cout<<"Now type Z and A numbers for isotope number "<<i<<", in that order, separated by space:\n";
-    cin>>x.Z>>x.A;
-    cout<<"Now type the number of such isotopes to simulate\n";
-    cin>>x.num;
-    initial_isotopes.push_back(x);
-  }
-  break;
-  } catch(...){
-    cerr<<"Bad input. Restarting...\n";
-  }
-  }
-  cout<<"Initial conditions correctly introduced\nSimulations results can be found in human readable format in results_decay_hist.out.\n A table of types and decay energy can be found in file results_tq_table than ca be used for more quantitative analyses\n\n";
-  simulate(initial_isotopes);
-};
-
-int main() {
-  userinput();
 }
