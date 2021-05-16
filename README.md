@@ -5,7 +5,7 @@ The results are written to 2 output files that contain the history of decays tha
 The code is centered around the class Nuclide that is used to manage the decay chains and it is the portable part of the software declared in nuclide.h. The implementation details of the class are in nuclide.cpp and main.cpp offers a convenient console application that simulates the evolution of a sample given by the user.
 
 ###Requirements
-Other that the Standard Library, this source code requires SQLite3 - C++ bindings available at https://sqlite.org/download.html 
+Other that the Standard Library, this source code requires SQLite3 - C++ bindings available at https://sqlite.org/download.html. If sqlite3 library is installed adding the flag -l sqlite3 to g++ compiler should suffice. 
 
 ### Database
 The file "nuclides.db" is a SQLite3 database that contains information on 3341 isotopes.
