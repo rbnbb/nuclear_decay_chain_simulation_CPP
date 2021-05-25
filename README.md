@@ -1,4 +1,9 @@
-# nuclidelove
+# Nuclear decay chain siulator in c++ with SQLite Database
+
+### Why use it
+You should use it if you need a SQLite database of 3341 isotopes to use in a C++ nuclear simulation. Class with interface to database is included
+
+### Intro
 This c++ software simulates nuclear decay chains using a database of decay modes and half lifes "nuclides.db".
 The results are written to 2 output files that contain the history of decays that the input sample underwent.
 
